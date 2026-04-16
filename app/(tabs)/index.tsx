@@ -1,98 +1,246 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import Button from "@/components/app/Button";
+import Row from "@/components/app/Row";
+import { useEffect, useState } from "react";
+import {
+  FlatList,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+// ⚠️ Change to your machine's local IP when testing on a physical device
+// e.g. "http://192.168.1.x:8080/api/v1/charges"
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8080/api/v1/charges";
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [currentValue, setCurrentValue] = useState("0.00");
+  const [items, setItems] = useState<{ id: string; value: number }[]>([]);
+  const [loading, setLoading] = useState(false);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const total = items.reduce((sum, item) => sum + item.value, 0).toFixed(2);
+
+  const fetchCharges = async () => {
+    try {
+      const res = await fetch(API_URL);
+      const data = await res.json();
+
+      setItems(
+        data.map((item: any) => ({
+          id: item.id,
+          value: parseFloat(item.amount),
+        })),
+      );
+    } catch (err) {
+      console.error("Fetch error", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCharges();
+  }, []);
+
+  const addCharge = async () => {
+    const amount = parseFloat(currentValue);
+    if (amount === 0 || loading) return;
+
+    setLoading(true);
+
+    const idempotencyKey = `${Date.now()}-${Math.random()}`;
+
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ amount }),
+      });
+
+      await fetchCharges();
+      setCurrentValue("0.00");
+    } catch (err) {
+      console.error("Add error", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteItem = async (id: string) => {
+    try {
+      await fetch(`${API_URL}/${id}`, {
+        method: "DELETE",
+      });
+
+      setItems((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      console.error("Delete error", err);
+    }
+  };
+
+  const handlePress = (type: string, value: number) => {
+    if (type === "ADD") return addCharge();
+
+    if (type === "DEL") {
+      const currentCents = Math.round(parseFloat(currentValue) * 100);
+      const newCents = Math.floor(currentCents / 10);
+      setCurrentValue((newCents / 100).toFixed(2));
+    }
+
+    if (type === "number") {
+      const currentCents = Math.round(parseFloat(currentValue) * 100);
+      const newCents = currentCents * 10 + value;
+
+      if (newCents / 100 > 1_000_000) return;
+
+      setCurrentValue((newCents / 100).toFixed(2));
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+
+      <View style={styles.displayContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end" }}
+        >
+          <Text style={styles.value}>R {currentValue}</Text>
+        </ScrollView>
+      </View>
+
+      <View>
+        <Row>
+          <Button text="1" onPress={() => handlePress("number", 1)} />
+          <Button text="2" onPress={() => handlePress("number", 2)} />
+          <Button text="3" onPress={() => handlePress("number", 3)} />
+        </Row>
+        <Row>
+          <Button text="4" onPress={() => handlePress("number", 4)} />
+          <Button text="5" onPress={() => handlePress("number", 5)} />
+          <Button text="6" onPress={() => handlePress("number", 6)} />
+        </Row>
+        <Row>
+          <Button text="7" onPress={() => handlePress("number", 7)} />
+          <Button text="8" onPress={() => handlePress("number", 8)} />
+          <Button text="9" onPress={() => handlePress("number", 9)} />
+        </Row>
+        <Row>
+          <Button text="DEL" onPress={() => handlePress("DEL", 0)} />
+          <Button text="0" onPress={() => handlePress("number", 0)} />
+          <Button text="ADD" onPress={() => handlePress("ADD", 0)} />
+        </Row>
+      </View>
+
+      <View style={styles.cartContainer}>
+        <FlatList
+          data={items}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.itemRow}>
+              <Text style={styles.itemText}>R {item.value.toFixed(2)}</Text>
+
+              <TouchableOpacity onPress={() => deleteItem(item.id)}>
+                <Text style={styles.delete}>DEL</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No charges yet</Text>
+            </View>
+          }
+          style={{ flex: 1 }}
+        />
+
+        <View style={styles.totalRow}>
+          <Text style={styles.totalText}>Total</Text>
+          <Text style={styles.totalText}>R {total}</Text>
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    backgroundColor: "#e8edf4",
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  displayContainer: {
+    paddingVertical: 40,
+    paddingHorizontal: 10,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+
+  value: {
+    color: "#2D3142",
+    fontSize: 40,
+    textAlign: "right",
+    fontFamily: "monospace",
+  },
+
+  cartContainer: {
+    flex: 1,
+    backgroundColor: "#545e75",
+  },
+
+  itemRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingEnd: 40,
+    paddingVertical: 2,
+    alignItems: "center",
+  },
+
+  itemText: {
+    color: "#f7f9fc",
+    fontSize: 18,
+    fontFamily: "monospace",
+    marginEnd: 15,
+  },
+
+  delete: {
+    color: "#f7f9fc",
+    fontSize: 16,
+    borderColor: "#f7f9fc",
+    borderWidth: 1,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+  },
+
+  totalRow: {
+    borderTopWidth: 1,
+    borderColor: "#000",
+    padding: 15,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+  },
+
+  totalText: {
+    fontSize: 22,
+    fontFamily: "monospace",
+  },
+
+  emptyContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+
+  emptyText: {
+    color: "#c0c8d8",
+    fontSize: 16,
+    fontFamily: "monospace",
+    fontStyle: "italic",
   },
 });
